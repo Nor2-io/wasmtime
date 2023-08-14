@@ -1364,10 +1364,7 @@ impl<'a> InterfaceGenerator<'a> {
             .map(|(_, rust_errortype)| (result, rust_errortype))
     }
 
-    fn generate_add_to_linker(&mut self, id: InterfaceId, name: &str) {
-        let iface = &self.resolve.interfaces[id];
-        let owner = TypeOwner::Interface(id);
-
+    fn get_resources_in_interface(&self,iface: &Interface) -> HashSet<String> {
         let mut resource_set = HashSet::new();
 
         for (_name, func) in iface.functions.iter() {
@@ -1377,7 +1374,16 @@ impl<'a> InterfaceGenerator<'a> {
                     resource_set.insert(resource.0.clone());
                 }
             }
-        } 
+        }
+
+        resource_set
+    }
+
+    fn generate_add_to_linker(&mut self, id: InterfaceId, name: &str) {
+        let iface = &self.resolve.interfaces[id];
+        let owner = TypeOwner::Interface(id);
+
+        let resource_set = self.get_resources_in_interface(iface);
 
         for resource_name in resource_set.iter() {
             let resource_impl_name = self.gen.opts.resources.get(resource_name).expect(&format!("no implementation defined for resource `{resource_name}`"));
@@ -1685,7 +1691,7 @@ impl<'a> InterfaceGenerator<'a> {
         }
     }
 
-    fn get_resource_from_tyid(&mut self, id: &TypeId) -> Vec<(String, TypeOwner)> {
+    fn get_resource_from_tyid(&self, id: &TypeId) -> Vec<(String, TypeOwner)> {
         let ty = &self.resolve().types[*id];
 
         let mut types = Vec::new();
@@ -1744,7 +1750,7 @@ impl<'a> InterfaceGenerator<'a> {
         types
     }
 
-    fn get_resource_from_ty(&mut self, ty: &Type) -> Vec<(String, TypeOwner)> {
+    fn get_resource_from_ty(&self, ty: &Type) -> Vec<(String, TypeOwner)> {
         let mut types = Vec::new();
         match ty {
             Type::Bool |
@@ -2543,6 +2549,7 @@ impl<'a> RustGenerator<'a> for InterfaceGenerator<'a> {
 
     fn path_to_interface(&self, interface: InterfaceId) -> Option<String> {
         let mut path_to_root = String::new();
+        //TODO: Check if an interface is an export when implementing function parameters
         if let Some((cur, key, is_export)) = self.current_interface {
             if cur == interface {
                 return None;
