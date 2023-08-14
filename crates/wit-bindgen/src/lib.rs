@@ -1,7 +1,7 @@
 use crate::rust::{to_rust_ident, to_rust_upper_camel_case, RustGenerator, TypeMode};
 use crate::types::{TypeInfo, Types};
 use heck::*;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write as _;
 use std::io::{Read, Write};
 use std::mem;
@@ -1173,9 +1173,8 @@ impl<'a> InterfaceGenerator<'a> {
         }
     }
 
-    fn type_handle(&mut self, id: TypeId, _name: &str, h: &Handle, docs: &Docs) {
+    fn type_handle(&mut self, _id: TypeId, _name: &str, _h: &Handle, docs: &Docs) {
         self.rustdoc(docs);
-        //dbg!(_name);
         //self.push_str(&format!("wasmtime::component::Resource<Rep{_name}>",))
         //todo!("#6722")
     }
@@ -1357,23 +1356,21 @@ impl<'a> InterfaceGenerator<'a> {
         let iface = &self.resolve.interfaces[id];
         let owner = TypeOwner::Interface(id);
 
-        let mut resource = false;
+        let mut resource_set = HashSet::new();
 
         for (_name, func) in iface.functions.iter() {
-            
-            match func.kind {
-                FunctionKind::Freestanding => {},
-                FunctionKind::Method(_)|
-                FunctionKind::Static(_)|
-                FunctionKind::Constructor(_) => {
-                    resource = true;
-                },
+            for param in func.params.iter() {
+                let resources = self.get_resource_from_ty(&param.1);
+                for resource in resources.iter() {
+                    resource_set.insert(resource.0.clone());
+                }
             }
         } 
 
-        //TODO: Handle multiple imports of a resource
-        if resource { 
-            uwriteln!(self.src, "use super::super::super::ImplScalars;");
+        for resource_name in resource_set.iter() {
+            let resource_impl_name = self.gen.opts.resources.get(resource_name).expect(&format!("no implementation defined for resource `{resource_name}`"));
+
+            uwriteln!(self.src, "use super::super::super::{resource_impl_name};");
         }
 
         if self.gen.opts.async_ {
@@ -1394,8 +1391,7 @@ impl<'a> InterfaceGenerator<'a> {
         }
         uwriteln!(self.src, "}}");
 
-        //TODO: Replace with loop to add constraint for each implementation a resource.
-        let resource_traits = if resource { 
+        let resource_traits = if !resource_set.is_empty() { 
 
             let traits = self.gen.opts.resources.iter()
                 .map(|(_wit_name, impl_name)| format!("wasmtime::component::ResourceTable<{impl_name}>"))
@@ -1440,7 +1436,7 @@ impl<'a> InterfaceGenerator<'a> {
         );
         uwriteln!(self.src, "let mut inst = linker.instance(\"{name}\")?;");
 
-        if resource { 
+        if !resource_set.is_empty() { 
             for (wit_name, impl_name) in self.gen.opts.resources.iter() {
                 uwriteln!(self.src, 
                     "
@@ -1882,8 +1878,6 @@ impl<'a> InterfaceGenerator<'a> {
             }
         }
 
-        dbg!(params);
-
         self.push_str(")");
         self.push_str(" -> ");
 
@@ -2091,7 +2085,7 @@ impl<'a> InterfaceGenerator<'a> {
             }
             FunctionKind::Constructor(_) => {
                 let (_, name, _) = self.current_interface.unwrap();
-                dbg!(&resolve.package_names);
+
                 let name = resolve.name_world_key(name);
                 let mut s = format!(
                     "
@@ -2256,8 +2250,7 @@ impl<'a> InterfaceGenerator<'a> {
             ("", "", "")
         };
 
-        let params: Vec<Option<Vec<(String, TypeOwner)>>> = {
-            func.params.iter().map(|param| {
+        let params: Vec<Option<Vec<(String, TypeOwner)>>> = func.params.iter().map(|param| {
                 let resources = self.get_resource_from_ty(&param.1);
 
                 if resources.is_empty() {
@@ -2265,8 +2258,7 @@ impl<'a> InterfaceGenerator<'a> {
                 } else {
                     Some(resources)
                 }
-            }).collect()
-        };
+            }).collect();
 
         let resources: Vec<Vec<(String, TypeOwner)>> = params.clone().into_iter().flatten().collect();
 
