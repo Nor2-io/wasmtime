@@ -1173,10 +1173,24 @@ impl<'a> InterfaceGenerator<'a> {
         }
     }
 
-    fn type_handle(&mut self, _id: TypeId, _name: &str, _h: &Handle, docs: &Docs) {
-        self.rustdoc(docs);
-        //self.push_str(&format!("wasmtime::component::Resource<Rep{_name}>",))
-        //todo!("#6722")
+    fn type_handle(&mut self, id: TypeId, _name: &str, h: &Handle, docs: &Docs) {
+        //TODO: Conditionally assigned to a resource representation or host implementation based on the resource being typed
+        let info = self.info(id);
+        for (name, mode) in self.modes_of(id) {
+            let lt = self.lifetime_for(&info, mode);
+            self.rustdoc(docs);
+            self.push_str(&format!("pub type {}", name));
+            self.print_generics(lt);
+            self.push_str(" = ");
+            match h {
+                Handle::Own(id)|
+                Handle::Borrow(id) => {
+                    self.print_tyid(*id, mode);
+                },
+            }
+            self.push_str(";\n");
+            self.assert_type(id, &name);
+        }
     }
 
     fn type_resource(&mut self, dir: Direction, id: TypeId, name: &str, docs: &Docs) {
@@ -1208,9 +1222,6 @@ impl<'a> InterfaceGenerator<'a> {
 
         for (_, func) in &iface.functions {
             match func.kind {
-                FunctionKind::Freestanding => {
-                    // Do nothing as free standing functions can't be a part of a resource
-                }
                 FunctionKind::Method(resource)
                 | FunctionKind::Static(resource)
                 | FunctionKind::Constructor(resource) => {
@@ -1222,6 +1233,9 @@ impl<'a> InterfaceGenerator<'a> {
                         }
                     }
                 }
+                FunctionKind::Freestanding => {
+                    // Do nothing as free standing functions can't be a part of a resource
+                }
             }
         }
 
@@ -1231,16 +1245,11 @@ impl<'a> InterfaceGenerator<'a> {
             return;
         }
         
-        //TODO: Only run if the resource is being exported
-        //This is the resource the implementer should implement the trait for
         uwriteln!(self.src, "use wasmtime::component::ToHandle;");
         uwriteln!(self.src, "pub struct Rep{camel} {{");
         uwriteln!(self.src, "pub handle: wasmtime::component::ResourceAny,");
         for (_, func) in iface.functions.iter() {
             match func.kind {
-                FunctionKind::Freestanding => {
-                    // Do nothing as free standing functions can't be a part of a resource
-                }
                 FunctionKind::Method(resource)
                 | FunctionKind::Static(resource)
                 | FunctionKind::Constructor(resource) => {
@@ -1252,6 +1261,9 @@ impl<'a> InterfaceGenerator<'a> {
                             func.name.to_snake_case()
                         );
                     }
+                }
+                FunctionKind::Freestanding => {
+                    // Do nothing as free standing functions can't be a part of a resource
                 }
             }
         }
@@ -1273,9 +1285,6 @@ impl<'a> InterfaceGenerator<'a> {
 
         for (_, func) in &iface.functions {
             match func.kind {
-                FunctionKind::Freestanding => {
-                    // Do nothing as freestanding functions can only be part of a resource
-                }
                 FunctionKind::Method(resource)
                 | FunctionKind::Static(resource)
                 | FunctionKind::Constructor(resource) => {
@@ -1288,6 +1297,9 @@ impl<'a> InterfaceGenerator<'a> {
                             iface,
                         );
                     }
+                }
+                FunctionKind::Freestanding => {
+                    // Do nothing as freestanding functions can only be part of a resource
                 }
             }
         }
@@ -1859,7 +1871,7 @@ impl<'a> InterfaceGenerator<'a> {
             _ => {}
         }
 
-        let mut params: HashMap<String, Vec<(String, TypeOwner)>> = HashMap::new();
+        let mut params: BTreeMap<String, Vec<(String, TypeOwner)>> = BTreeMap::new();
 
         for (name, param) in func.params.iter() {
 

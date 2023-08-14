@@ -209,17 +209,17 @@ pub trait RustGenerator<'a> {
                 out.push_str(&self.print_optional_ty_(stream.end.as_ref(), mode));
                 out.push_str(">");
             }
-            TypeDefKind::Handle(Handle::Own(ty)) => {
+            TypeDefKind::Handle(Handle::Own(_ty)) => {
                 //TODO: Clean up how resource types are outputted
                 out.push_str("wasmtime::component::ResourceAny");
-                //self.push_str("wasmtime::component::Resource<Rep");
+                //self.push_str("wasmtime::component::Resource<");
                 //self.print_tyid(*ty, mode);
                 //self.push_str(">");
             }
-            TypeDefKind::Handle(Handle::Borrow(ty)) => {
+            TypeDefKind::Handle(Handle::Borrow(_ty)) => {
                 //TODO: Clean up how resource types are outputted
                 out.push_str("wasmtime::component::ResourceAny");
-                //self.push_str("wasmtime::component::Resource<Rep");
+                //self.push_str("wasmtime::component::Resource<");
                 //self.print_tyid(*ty, mode);
                 //self.push_str(">");
             }
