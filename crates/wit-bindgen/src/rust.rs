@@ -29,45 +29,65 @@ pub trait RustGenerator<'a> {
     fn ownership(&self) -> Ownership;
 
     fn print_ty(&mut self, ty: &Type, mode: TypeMode) {
+        self.push_str(&self.print_ty_(ty, mode));
+    }
+
+    #[must_use]
+    fn print_ty_(&self, ty: &Type, mode: TypeMode) -> String {
         match ty {
-            Type::Id(t) => self.print_tyid(*t, mode),
-            Type::Bool => self.push_str("bool"),
-            Type::U8 => self.push_str("u8"),
-            Type::U16 => self.push_str("u16"),
-            Type::U32 => self.push_str("u32"),
-            Type::U64 => self.push_str("u64"),
-            Type::S8 => self.push_str("i8"),
-            Type::S16 => self.push_str("i16"),
-            Type::S32 => self.push_str("i32"),
-            Type::S64 => self.push_str("i64"),
-            Type::Float32 => self.push_str("f32"),
-            Type::Float64 => self.push_str("f64"),
-            Type::Char => self.push_str("char"),
+            Type::Id(t) => self.print_tyid_(*t, mode),
+            Type::Bool => "bool".to_owned(),
+            Type::U8 => "u8".to_owned(),
+            Type::U16 => "u16".to_owned(),
+            Type::U32 => "u32".to_owned(),
+            Type::U64 => "u64".to_owned(),
+            Type::S8 => "i8".to_owned(),
+            Type::S16 => "i16".to_owned(),
+            Type::S32 => "i32".to_owned(),
+            Type::S64 => "i64".to_owned(),
+            Type::Float32 => "f32".to_owned(),
+            Type::Float64 => "f64".to_owned(),
+            Type::Char => "char".to_owned(),
             Type::String => match mode {
                 TypeMode::AllBorrowed(lt) => {
-                    self.push_str("&");
+                    let mut out: String = "&".to_owned();
                     if lt != "'_" {
-                        self.push_str(lt);
-                        self.push_str(" ");
+                        out.push_str(lt);
+                        out.push_str(" ");
                     }
-                    self.push_str("str");
+                    out.push_str("str");
+
+                    out
                 }
-                TypeMode::Owned => self.push_str("String"),
+                TypeMode::Owned => "String".to_owned(),
             },
         }
     }
 
     fn print_optional_ty(&mut self, ty: Option<&Type>, mode: TypeMode) {
+        self.push_str(&self.print_optional_ty_(ty, mode));
+    }
+
+    #[must_use]
+    fn print_optional_ty_(&self, ty: Option<&Type>, mode: TypeMode) -> String {
         match ty {
-            Some(ty) => self.print_ty(ty, mode),
-            None => self.push_str("()"),
+            Some(ty) => self.print_ty_(ty, mode),
+            None => "()".to_owned(),
         }
     }
 
     fn print_tyid(&mut self, id: TypeId, mode: TypeMode) {
+        self.push_str(&self.print_tyid_(id, mode));
+    }
+
+    #[must_use]
+    fn print_tyid_(&self, id: TypeId, mode: TypeMode) -> String {
         let info = self.info(id);
         let lt = self.lifetime_for(&info, mode);
         let ty = &self.resolve().types[id];
+
+        let mut out = String::default();
+
         if ty.name.is_some() {
             // If this type has a list internally, no lifetime is being printed,
             // but we're in a borrowed mode, then that means we're in a borrowed
@@ -76,10 +96,10 @@ pub trait RustGenerator<'a> {
             // the API level, ownership isn't required.
             if info.has_list && lt.is_none() {
                 if let TypeMode::AllBorrowed(lt) = mode {
-                    self.push_str("&");
+                    out.push_str("&");
                     if lt != "'_" {
-                        self.push_str(lt);
-                        self.push_str(" ");
+                        out.push_str(lt);
+                        out.push_str(" ");
                     }
                 }
             }
@@ -90,20 +110,22 @@ pub trait RustGenerator<'a> {
             };
             if let TypeOwner::Interface(id) = ty.owner {
                 if let Some(path) = self.path_to_interface(id) {
-                    self.push_str(&path);
-                    self.push_str("::");
+                    out.push_str(&path);
+                    out.push_str("::");
                 }
             }
-            self.push_str(&name);
+            out.push_str(&name);
 
             // If the type recursively owns data and it's a
             // variant/record/list, then we need to place the
             // lifetime parameter on the type as well.
             if info.has_list && needs_generics(self.resolve(), &ty.kind) {
-                self.print_generics(lt);
+                if let Some(generics) = self.print_generics_(lt) {
+                    out.push_str(&generics);
+                }
             }
 
-            return;
+            return out;
 
             fn needs_generics(resolve: &Resolve, ty: &TypeDefKind) -> bool {
                 match ty {
@@ -131,20 +153,20 @@ pub trait RustGenerator<'a> {
         }
 
         match &ty.kind {
-            TypeDefKind::List(t) => self.print_list(t, mode),
+            TypeDefKind::List(t) => out.push_str(&self.print_list_(t, mode)),
 
             TypeDefKind::Option(t) => {
-                self.push_str("Option<");
-                self.print_ty(t, mode);
-                self.push_str(">");
+                out.push_str("Option<");
+                out.push_str(&self.print_ty_(t, mode));
+                out.push_str(">");
             }
 
             TypeDefKind::Result(r) => {
-                self.push_str("Result<");
-                self.print_optional_ty(r.ok.as_ref(), mode);
-                self.push_str(",");
-                self.print_optional_ty(r.err.as_ref(), mode);
-                self.push_str(">");
+                out.push_str("Result<");
+                out.push_str(&self.print_optional_ty_(r.ok.as_ref(), mode));
+                out.push_str(",");
+                out.push_str(&self.print_optional_ty_(r.err.as_ref(), mode));
+                out.push_str(">");
             }
 
             TypeDefKind::Variant(_) => panic!("unsupported anonymous variant"),
@@ -153,12 +175,12 @@ pub trait RustGenerator<'a> {
             // types. Note the trailing comma after each member to
             // appropriately handle 1-tuples.
             TypeDefKind::Tuple(t) => {
-                self.push_str("(");
+                out.push_str("(");
                 for ty in t.types.iter() {
-                    self.print_ty(ty, mode);
-                    self.push_str(",");
+                    out.push_str(&self.print_ty_(ty, mode));
+                    out.push_str(",");
                 }
-                self.push_str(")");
+                out.push_str(")");
             }
             TypeDefKind::Resource => {
                 panic!("unsupported anonymous type reference: resource")
@@ -176,37 +198,44 @@ pub trait RustGenerator<'a> {
                 panic!("unsupported anonymous type reference: union")
             }
             TypeDefKind::Future(ty) => {
-                self.push_str("Future<");
-                self.print_optional_ty(ty.as_ref(), mode);
-                self.push_str(">");
+                out.push_str("Future<");
+                out.push_str(&self.print_optional_ty_(ty.as_ref(), mode));
+                out.push_str(">");
             }
             TypeDefKind::Stream(stream) => {
-                self.push_str("Stream<");
-                self.print_optional_ty(stream.element.as_ref(), mode);
-                self.push_str(",");
-                self.print_optional_ty(stream.end.as_ref(), mode);
-                self.push_str(">");
+                out.push_str("Stream<");
+                out.push_str(&self.print_optional_ty_(stream.element.as_ref(), mode));
+                out.push_str(",");
+                out.push_str(&self.print_optional_ty_(stream.end.as_ref(), mode));
+                out.push_str(">");
             }
             TypeDefKind::Handle(Handle::Own(ty)) => {
                 //TODO: Clean up how resource types are outputted
-                self.push_str("wasmtime::component::ResourceAny");
+                out.push_str("wasmtime::component::ResourceAny");
                 //self.push_str("wasmtime::component::Resource<Rep");
                 //self.print_tyid(*ty, mode);
                 //self.push_str(">");
             }
             TypeDefKind::Handle(Handle::Borrow(ty)) => {
                 //TODO: Clean up how resource types are outputted
-                self.push_str("wasmtime::component::ResourceAny");
+                out.push_str("wasmtime::component::ResourceAny");
                 //self.push_str("wasmtime::component::Resource<Rep");
                 //self.print_tyid(*ty, mode);
                 //self.push_str(">");
             }
-            TypeDefKind::Type(t) => self.print_ty(t, mode),
+            TypeDefKind::Type(t) => out.push_str(&self.print_ty_(t, mode)),
             TypeDefKind::Unknown => unreachable!(),
         }
+
+        out
     }
 
     fn print_list(&mut self, ty: &Type, mode: TypeMode) {
+        self.push_str(&self.print_list_(ty, mode));
+    }
+
+    #[must_use]
+    fn print_list_(&self, ty: &Type, mode: TypeMode) -> String {
         let next_mode = if matches!(self.ownership(), Ownership::Owning) {
             TypeMode::Owned
         } else {
@@ -214,33 +243,44 @@ pub trait RustGenerator<'a> {
         };
         match mode {
             TypeMode::AllBorrowed(lt) => {
-                self.push_str("&");
+                let mut out = "&".to_owned();
+
                 if lt != "'_" {
-                    self.push_str(lt);
-                    self.push_str(" ");
+                    out.push_str(lt);
+                    out.push_str(" ");
                 }
-                self.push_str("[");
-                self.print_ty(ty, next_mode);
-                self.push_str("]");
+                out.push_str("[");
+                out.push_str(&self.print_ty_(ty, next_mode));
+                out.push_str("]");
+
+                out
             }
             TypeMode::Owned => {
-                self.push_str("Vec<");
-                self.print_ty(ty, next_mode);
-                self.push_str(">");
+                format!("Vec<{}>", self.print_ty_(ty, next_mode))
             }
         }
     }
 
     fn print_generics(&mut self, lifetime: Option<&str>) {
+        if let Some(lt) = self.print_generics_(lifetime) {
+            self.push_str(&lt);
+        }
+    }
+
+    #[must_use]
+    fn print_generics_(&self, lifetime: Option<&str>) -> Option<String> {
         if lifetime.is_none() {
-            return;
+            return None;
         }
-        self.push_str("<");
+        let mut out = "<".to_owned();
+
         if let Some(lt) = lifetime {
-            self.push_str(lt);
-            self.push_str(",");
+            out.push_str(lt);
+            out.push_str(",");
         }
-        self.push_str(">");
+        out.push_str(">");
+
+        Some(out)
     }
 
     fn modes_of(&self, ty: TypeId) -> Vec<(String, TypeMode)> {

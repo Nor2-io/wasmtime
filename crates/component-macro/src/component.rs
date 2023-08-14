@@ -34,7 +34,6 @@ impl fmt::Display for VariantStyle {
 #[derive(Debug, Copy, Clone)]
 enum Style {
     Record,
-    //Resource,
     Variant(VariantStyle),
 }
 
@@ -65,12 +64,7 @@ impl Parse for Style {
         if lookahead.peek(kw::record) {
             input.parse::<kw::record>()?;
             Ok(Style::Record)
-        }
-        /*else if lookahead.peek(kw::resource) {
-            input.parse::<kw::resource>()?;
-            Ok(Style::Resource)
-        } */
-        else if lookahead.peek(kw::variant) {
+        } else if lookahead.peek(kw::variant) {
             input.parse::<kw::variant>()?;
             Ok(Style::Variant(VariantStyle::Variant))
         } else if lookahead.peek(Token![enum]) {
