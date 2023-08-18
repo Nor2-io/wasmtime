@@ -493,16 +493,16 @@ pub trait ToHandle {
 /// Trait used by the generated host implementation for resources
 pub trait ResourceTable<T> {
     /// Get's a resource with the corresponding handle.
-    fn get_resource(&self, handle: Resource<T>) -> &T;
+    fn get_resource(&self, handle: Resource<T>) -> Result<&T>;
 
     /// Get's a resource as mutable with the corresponding handle.
-    fn get_resource_mut(&mut self, handle: Resource<T>) -> &mut T;
+    fn get_resource_mut(&mut self, handle: Resource<T>) -> Result<&mut T>;
 
     /// Used to create a new resource handle for a host representation of a resource.
-    fn new_resource(&mut self, resource: T) -> Resource<T>;
+    fn new_resource(&mut self, resource: T) -> Result<Resource<T>>;
 
     /// Drops the resource handle.
-    fn drop_resource(&mut self, rep: u32);
+    fn drop_resource(&mut self, rep: u32) -> Result<()>;
 }
 
 #[derive(Copy, Clone)]

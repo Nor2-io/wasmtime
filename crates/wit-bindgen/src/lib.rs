@@ -1596,7 +1596,7 @@ impl<'a> InterfaceGenerator<'a> {
             },
             FunctionKind::Method(_) => {
                 //TODO: Change to from `get_resource_mut` to `get_resource` if it's not mutating the state
-                uwriteln!(self.src, "let mut resource = caller.data_mut().get_resource_mut(arg0);");
+                uwriteln!(self.src, "let mut resource = caller.data_mut().get_resource_mut(arg0)?;");
 
                 uwrite!(self.src, "let r = resource.{func_name}(");
 
@@ -1644,7 +1644,7 @@ impl<'a> InterfaceGenerator<'a> {
                     uwrite!(self.src, ")?;\n");
                 }
 
-                uwrite!(self.src, "let r = caller.data_mut().new_resource(resource);");
+                uwrite!(self.src, "let r = caller.data_mut().new_resource(resource)?;");
             },
         }
 
@@ -2401,7 +2401,7 @@ impl<'a> InterfaceGenerator<'a> {
         if !args_map.is_empty() {
             for (i, param) in params.iter().enumerate() {
                 if let Some(_) = param {
-                    uwrite!(self.src, "let arg{i} = store.as_context_mut().data_mut().new_resource(arg{i});");
+                    uwrite!(self.src, "let arg{i} = store.as_context_mut().data_mut().new_resource(arg{i})?;");
                 }
             }
         } 
