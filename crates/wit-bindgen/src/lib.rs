@@ -1247,7 +1247,7 @@ impl<'a> InterfaceGenerator<'a> {
         
         uwriteln!(self.src, "use wasmtime::component::ToHandle;");
         uwriteln!(self.src, "pub struct Rep{camel} {{");
-        uwriteln!(self.src, "pub handle: wasmtime::component::ResourceAny,");
+        uwriteln!(self.src, "handle: wasmtime::component::ResourceAny,");
         for (_, func) in iface.functions.iter() {
             match func.kind {
                 FunctionKind::Method(resource)
@@ -2285,17 +2285,19 @@ impl<'a> InterfaceGenerator<'a> {
 
         let mut args_map = BTreeMap::new();
 
-        for (i, resource) in resources.iter().enumerate() {
-            let (resource_trait_name, resource_owner) = resource.first().unwrap();
-            let resource_trait_name = resource_trait_name.to_upper_camel_case();
-
-            if *resource_owner == owner {
-                continue;
+        for (i, resource) in params.iter().enumerate() {
+            if let Some(resource) = resource {
+                let (resource_trait_name, resource_owner) = resource.first().unwrap();
+                let resource_trait_name = resource_trait_name.to_upper_camel_case();
+    
+                //if *resource_owner == owner {
+                //    continue;
+                //}
+    
+                let arg_name = format!("R{i}");
+    
+                args_map.insert(resource_trait_name.clone(), (arg_name, resource_owner.clone())); 
             }
-
-            let arg_name = format!("R{i}");
-
-            args_map.insert(resource_trait_name.clone(), arg_name); 
         }
 
         if args_map.is_empty() {
@@ -2303,18 +2305,28 @@ impl<'a> InterfaceGenerator<'a> {
         } else {
             let mut t = String::default();
 
-            for (i, (resource_trait_name, arg_name)) in args_map.iter().enumerate() {
-                uwriteln!(self.src,"{arg_name}: {resource_trait_name} + 'static,");
-                uwrite!(t, "wasmtime::component::ResourceTable<{arg_name}> ");
+            for (i, (resource_trait_name, (arg_name, resource_owner))) in args_map.iter().enumerate() {
+                
 
-                if i != args_map.len() - 1 {
-                    uwrite!(t, "+ ");
-                }    
+                if *resource_owner == owner {
+                    uwriteln!(self.src,"{arg_name}: {resource_trait_name} + wasmtime::component::ToHandle,");
+                } else {
+                    uwriteln!(self.src,"{arg_name}: {resource_trait_name} + 'static,");
+                    uwrite!(t, "wasmtime::component::ResourceTable<{arg_name}> ");
+
+                    if i != args_map.len() - 1 {
+                        uwrite!(t, "+ ");
+                    }  
+                }
             }
 
-            uwriteln!(self.src,"T: {t},");
+            if &t != "" {
+                uwriteln!(self.src,"T: {t},");
 
-            uwriteln!(self.src,"S: wasmtime::AsContextMut<Data = T>,>(&self, mut store: S, ");
+                uwriteln!(self.src,"S: wasmtime::AsContextMut<Data = T>,>(&self, mut store: S, ");
+            } else {
+                uwrite!(self.src, "S: wasmtime::AsContextMut>(&self, mut store: S, ",);
+            }
         }
 
         for (i, param) in func.params.iter().enumerate() {
@@ -2326,8 +2338,10 @@ impl<'a> InterfaceGenerator<'a> {
                     let (resource_trait_name, resource_owner) = resource.first().unwrap();
                     let resource_trait_name = resource_trait_name.to_upper_camel_case();
 
-                    match (args_map.get(&resource_trait_name), *resource_owner == owner) {
-                        (Some(arg_name), false) => uwrite!(self.src, "{arg_name}"),
+                    match args_map.get(&resource_trait_name) {
+                        Some((arg_name, _)) => {
+                            uwrite!(self.src, "{arg_name}");
+                        },
                         _=> self.print_ty(&param.1, TypeMode::AllBorrowed("'_")),
                     }
                 },
@@ -2376,7 +2390,7 @@ impl<'a> InterfaceGenerator<'a> {
                     let resource_trait_name = resource_trait_name.to_upper_camel_case();
                     
                     match (args_map.get(&resource_trait_name), *resource_owner == owner) {
-                        (Some(arg_name), false) => uwrite!(self.src, "wasmtime::component::Resource<{arg_name}>"),
+                        (Some((arg_name, _)), false) => uwrite!(self.src, "wasmtime::component::Resource<{arg_name}>"),
                         _=> self.print_ty(&param.1, TypeMode::AllBorrowed("'_")),
                     }
                 },
@@ -2400,8 +2414,11 @@ impl<'a> InterfaceGenerator<'a> {
 
         if !args_map.is_empty() {
             for (i, param) in params.iter().enumerate() {
-                if let Some(_) = param {
-                    uwrite!(self.src, "let arg{i} = store.as_context_mut().data_mut().new_resource(arg{i})?;");
+                if let Some(param) = param {
+
+                    if param.first().unwrap().1 != owner {
+                        uwrite!(self.src, "let arg{i} = store.as_context_mut().data_mut().new_resource(arg{i})?;");
+                    }
                 }
             }
         } 
@@ -2414,8 +2431,17 @@ impl<'a> InterfaceGenerator<'a> {
             self.src,
             ") = callee.call{async__}(store.as_context_mut(), ("
         );
-        for (i, _) in func.params.iter().enumerate() {
-            uwrite!(self.src, "arg{}, ", i);
+        for (i, param) in params.iter().enumerate() {
+            if let Some(param) = param {
+
+                if param.first().unwrap().1 == owner {
+                    uwrite!(self.src, "arg{i}.to_handle(), ");
+                } else {
+                    uwrite!(self.src, "arg{i}, ");
+                }
+            } else {
+                uwrite!(self.src, "arg{i}, ");
+            }
         }
         uwriteln!(self.src, ")){await_}?;");
 
