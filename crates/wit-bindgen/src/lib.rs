@@ -1295,6 +1295,7 @@ impl<'a> InterfaceGenerator<'a> {
                             None,
                             func,
                             iface,
+                            &owner
                         );
                     }
                 }
@@ -1339,7 +1340,7 @@ impl<'a> InterfaceGenerator<'a> {
         owner: TypeOwner,
         results: &Results,
     ) -> Option<(&'a Result_, String)> {
-        // We fillin a special trappable error type in the case when a function has just one
+        // We fill in a special trappable error type in the case when a function has just one
         // result, which is itself a `result<a, e>`, and the `e` is *not* a primitive
         // (i.e. defined in std) type, and matches the typename given by the user.
         let mut i = results.iter_types();
@@ -1880,13 +1881,11 @@ impl<'a> InterfaceGenerator<'a> {
         let mut params: BTreeMap<String, Vec<(String, TypeOwner)>> = BTreeMap::new();
 
         for (name, param) in func.params.iter() {
-
             let name = to_rust_ident(name);
             params.insert(name, self.get_resource_from_ty(param));
         }
 
         for (name, param) in func.params.iter() {
-
             let name = to_rust_ident(name);
             if &name != "self_" {
                 self.push_str(&name);
@@ -2011,6 +2010,7 @@ impl<'a> InterfaceGenerator<'a> {
         ns: Option<&WorldKey>,
         func: &Function,
         iface: &Interface,
+        owner: &TypeOwner
     ) {
         let (async_, async__, await_) = if self.gen.opts.async_ {
             ("async", "_async", ".await")
@@ -2159,32 +2159,7 @@ impl<'a> InterfaceGenerator<'a> {
             },
         }
 
-        self.src.push_str("let callee = unsafe {\n");
-        self.src.push_str("wasmtime::component::TypedFunc::<(");
-        for (_, ty) in func.params.iter() {
-            self.print_ty(ty, TypeMode::AllBorrowed("'_"));
-            self.push_str(", ");
-        }
-        self.src.push_str("), (");
-        for ty in func.results.iter_types() {
-            self.print_ty(ty, TypeMode::Owned);
-            self.push_str(", ");
-        }
-
-        match func.kind {
-            FunctionKind::Freestanding | FunctionKind::Method(_) | FunctionKind::Static(_) => {
-                uwriteln!(
-                    self.src,
-                    ")>::new_unchecked(self.{})",
-                    func.name.to_snake_case()
-                );
-            }
-            FunctionKind::Constructor(_) => {
-                uwriteln!(self.src, ")>::new_unchecked({})", func.name.to_snake_case());
-            }
-        }
-
-        self.src.push_str("};\n");
+        self.define_callee(func, owner);
         
         self.src.push_str("let (");
         for (i, _) in func.results.iter_types().enumerate() {
@@ -2255,33 +2230,16 @@ impl<'a> InterfaceGenerator<'a> {
         self.src.push_str("}\n");
     }
 
-    fn define_rust_guest_export(
-        &mut self,
-        resolve: &Resolve,
-        ns: Option<&WorldKey>,
-        func: &Function,
-        owner: TypeOwner,
-    ) {
-        let (async_, async__, await_) = if self.gen.opts.async_ {
-            ("async", "_async", ".await")
-        } else {
-            ("", "", "")
-        };
+    fn define_callee(&mut self, func: &Function, owner: &TypeOwner) {
+        let params: Vec<Option<Vec<(String, TypeOwner)>>> = func.params.iter().map(|(_, ty)| {
+            let resources = self.get_resource_from_ty(ty);
 
-        let params: Vec<Option<Vec<(String, TypeOwner)>>> = func.params.iter().map(|param| {
-                let resources = self.get_resource_from_ty(&param.1);
-
-                if resources.is_empty() {
-                    None
-                } else {
-                    Some(resources)
-                }
-            }).collect();
-
-        let resources: Vec<Vec<(String, TypeOwner)>> = params.clone().into_iter().flatten().collect();
-
-        self.rustdoc(&func.docs);
-        uwrite!(self.src, "pub {async_} fn call_{}<", func.name.to_snake_case());
+            if resources.is_empty() {
+                None
+            } else {
+                Some(resources)
+            }
+        }).collect();
 
         let mut args_map = BTreeMap::new();
 
@@ -2289,26 +2247,89 @@ impl<'a> InterfaceGenerator<'a> {
             if let Some(resource) = resource {
                 let (resource_trait_name, resource_owner) = resource.first().unwrap();
                 let resource_trait_name = resource_trait_name.to_upper_camel_case();
-    
-                //if *resource_owner == owner {
-                //    continue;
-                //}
-    
+
                 let arg_name = format!("R{i}");
     
                 args_map.insert(resource_trait_name.clone(), (arg_name, resource_owner.clone())); 
             }
         }
 
+        self.src.push_str("let callee = unsafe {\n");
+        self.src.push_str("wasmtime::component::TypedFunc::<(");
+
+        for (i, (_, ty)) in func.params.iter().enumerate() {
+            match params.get(i).unwrap() {
+                Some(resource) => {
+                    //TODO: Handle nested types
+                    let (resource_trait_name, resource_owner) = resource.first().unwrap();
+                    let resource_trait_name = resource_trait_name.to_upper_camel_case();
+                    
+                    match (args_map.get(&resource_trait_name), resource_owner == owner) {
+                        (Some((arg_name, _)), false) => uwrite!(self.src, "wasmtime::component::Resource<{arg_name}>"),
+                        _=> self.print_ty(ty, TypeMode::AllBorrowed("'_")),
+                    }
+                },
+                None => self.print_ty(ty, TypeMode::AllBorrowed("'_")),
+            }
+
+            self.push_str(",");
+        }
+
+        self.src.push_str("), (");
+        for ty in func.results.iter_types() {
+            self.print_ty(ty, TypeMode::Owned);
+            self.push_str(", ");
+        }
+
+        let func_handle = match func.kind {
+            FunctionKind::Constructor(_) => {
+                func.name.to_snake_case()
+            },
+            _ => format!("self.{}", func.name.to_snake_case()),
+        };
+        uwriteln!(self.src, ")>::new_unchecked({func_handle})");
+        self.src.push_str("};\n");
+    }
+
+    fn define_guest_export_function_sig(&mut self, func: &Function, owner: &TypeOwner) {
+        let params: Vec<Option<Vec<(String, TypeOwner)>>> = func.params.iter().map(|param| {
+            let resources = self.get_resource_from_ty(&param.1);
+
+            if resources.is_empty() {
+                None
+            } else {
+                Some(resources)
+            }
+        }).collect();
+        
+        let mut args_map = BTreeMap::new();
+
+        for (i, resource) in params.iter().enumerate() {
+            if let Some(resource) = resource {
+                let (resource_trait_name, resource_owner) = resource.first().unwrap();
+                let resource_trait_name = resource_trait_name.to_upper_camel_case();
+
+                let arg_name = format!("R{i}");
+    
+                args_map.insert(resource_trait_name.clone(), (arg_name, resource_owner.clone())); 
+            }
+        }
+
+        let async_ = if self.gen.opts.async_ {
+            "async"
+        } else {
+            ""
+        };
+
+        uwrite!(self.src, "pub {async_} fn call_{}<", func.name.to_snake_case());
+
         if args_map.is_empty() {
-            uwrite!(self.src, "S: wasmtime::AsContextMut>(&self, mut store: S, ",);
+            uwrite!(self.src, "S: wasmtime::AsContextMut",);
         } else {
             let mut t = String::default();
 
             for (i, (resource_trait_name, (arg_name, resource_owner))) in args_map.iter().enumerate() {
-                
-
-                if *resource_owner == owner {
+                if resource_owner == owner {
                     uwriteln!(self.src,"{arg_name}: {resource_trait_name} + wasmtime::component::ToHandle,");
                 } else {
                     uwriteln!(self.src,"{arg_name}: {resource_trait_name} + 'static,");
@@ -2323,42 +2344,79 @@ impl<'a> InterfaceGenerator<'a> {
             if &t != "" {
                 uwriteln!(self.src,"T: {t},");
 
-                uwriteln!(self.src,"S: wasmtime::AsContextMut<Data = T>,>(&self, mut store: S, ");
+                uwriteln!(self.src,"S: wasmtime::AsContextMut<Data = T>");
             } else {
-                uwrite!(self.src, "S: wasmtime::AsContextMut>(&self, mut store: S, ",);
+                uwrite!(self.src, "S: wasmtime::AsContextMut");
             }
         }
+
+        uwrite!(self.src, ">(&self, mut store: S, ",);
 
         for (i, param) in func.params.iter().enumerate() {
             uwrite!(self.src, "arg{i}: ");
 
-            match params.get(i).unwrap() {
-                Some(resource) => {
-                    //TODO: Handle nested types
-                    let (resource_trait_name, resource_owner) = resource.first().unwrap();
-                    let resource_trait_name = resource_trait_name.to_upper_camel_case();
-
-                    match args_map.get(&resource_trait_name) {
-                        Some((arg_name, _)) => {
-                            uwrite!(self.src, "{arg_name}");
-                        },
-                        _=> self.print_ty(&param.1, TypeMode::AllBorrowed("'_")),
-                    }
-                },
-                None => self.print_ty(&param.1, TypeMode::AllBorrowed("'_")),
+            if let Some(params) = params.get(i) {
+                match params {
+                    Some(resource) => {
+                        //TODO: Handle nested types
+                        let (resource_trait_name, _) = resource.first().unwrap();
+                        let resource_trait_name = resource_trait_name.to_upper_camel_case();
+    
+                        match args_map.get(&resource_trait_name) {
+                            Some((arg_name, _)) => {
+                                uwrite!(self.src, "{arg_name}");
+                            },
+                            _=> self.print_ty(&param.1, TypeMode::AllBorrowed("'_")),
+                        }
+                    },
+                    None => self.print_ty(&param.1, TypeMode::AllBorrowed("'_")),
+                }
+            } else {
+                self.print_ty(&param.1, TypeMode::AllBorrowed("'_"));
             }
 
-            self.push_str(",");
+            self.push_str(", ");
         }
-        self.src.push_str(") -> wasmtime::Result<");
-        self.print_result_ty(&func.results, TypeMode::Owned);
 
+        self.push_str(") -> ");
+
+        self.src.push_str("wasmtime::Result<");
+        self.print_result_ty(&func.results, TypeMode::Owned);
         if self.gen.opts.async_ {
             self.src
-                .push_str("> where <S as wasmtime::AsContext>::Data: Send {\n");
+                .push_str("> where <S as wasmtime::AsContext>::Data: Send");
         } else {
-            self.src.push_str("> {\n");
+            self.src.push_str(">");
         }
+    }
+
+    fn define_rust_guest_export(
+        &mut self,
+        resolve: &Resolve,
+        ns: Option<&WorldKey>,
+        func: &Function,
+        owner: TypeOwner,
+    ) {
+        let params: Vec<Option<Vec<(String, TypeOwner)>>> = func.params.iter().map(|param| {
+            let resources = self.get_resource_from_ty(&param.1);
+
+            if resources.is_empty() {
+                None
+            } else {
+                Some(resources)
+            }
+        }).collect();
+
+        let (async__, await_) = if self.gen.opts.async_ {
+            ("_async", ".await")
+        } else {
+            ("", "")
+        };
+
+        self.rustdoc(&func.docs);
+
+        self.define_guest_export_function_sig(func, &owner);
+        self.push_str(" {\n");
 
         if self.gen.opts.tracing {
             let ns = match ns {
@@ -2379,46 +2437,12 @@ impl<'a> InterfaceGenerator<'a> {
             ));
         }
 
-        self.src.push_str("let callee = unsafe {\n");
-        self.src.push_str("wasmtime::component::TypedFunc::<(");
+        self.define_callee(func, &owner);
 
-        for (i, param) in func.params.iter().enumerate() {
-            match params.get(i).unwrap() {
-                Some(resource) => {
-                    //TODO: Handle nested types
-                    let (resource_trait_name, resource_owner) = resource.first().unwrap();
-                    let resource_trait_name = resource_trait_name.to_upper_camel_case();
-                    
-                    match (args_map.get(&resource_trait_name), *resource_owner == owner) {
-                        (Some((arg_name, _)), false) => uwrite!(self.src, "wasmtime::component::Resource<{arg_name}>"),
-                        _=> self.print_ty(&param.1, TypeMode::AllBorrowed("'_")),
-                    }
-                },
-                None => self.print_ty(&param.1, TypeMode::AllBorrowed("'_")),
-            }
-
-            self.push_str(",");
-        }
-
-        self.src.push_str("), (");
-        for ty in func.results.iter_types() {
-            self.print_ty(ty, TypeMode::Owned);
-            self.push_str(", ");
-        }
-        uwriteln!(
-            self.src,
-            ")>::new_unchecked(self.{})",
-            func.name.to_snake_case()
-        );
-        self.src.push_str("};\n");
-
-        if !args_map.is_empty() {
-            for (i, param) in params.iter().enumerate() {
-                if let Some(param) = param {
-
-                    if param.first().unwrap().1 != owner {
-                        uwrite!(self.src, "let arg{i} = store.as_context_mut().data_mut().new_resource(arg{i})?;");
-                    }
+        for (i, param) in params.iter().enumerate() {
+            if let Some(param) = param {
+                if param.first().unwrap().1 != owner {
+                    uwrite!(self.src, "let arg{i} = store.as_context_mut().data_mut().new_resource(arg{i})?;");
                 }
             }
         } 
