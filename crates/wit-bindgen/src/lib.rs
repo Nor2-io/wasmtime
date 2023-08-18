@@ -1335,6 +1335,44 @@ impl<'a> InterfaceGenerator<'a> {
         }
     }
 
+    fn print_result_special_case_ty(&mut self, func: &Function, owner: TypeOwner) {
+        if let Some((r, error_typename)) = self.special_case_trappable_error(owner, &func.results) {
+            // Functions which have a single result `result<ok,err>` get special
+            // cased to use the host_wasmtime_rust::Error<err>, making it possible
+            // for them to trap or use `?` to propogate their errors
+            self.push_str("Result<");
+            if let Some(ok) = r.ok {
+                match func.kind {
+                    FunctionKind::Constructor(_) => {
+                        self.push_str("Self");
+                    }
+                    _ => {
+                        self.print_ty(&ok, TypeMode::Owned);
+                    }
+                }
+            } else {
+                self.push_str("()");
+            }
+            self.push_str(",");
+            self.push_str(&error_typename);
+            self.push_str(">");
+        } else {
+            // All other functions get their return values wrapped in an wasmtime::Result.
+            // Returning the anyhow::Error case can be used to trap.
+            self.push_str("wasmtime::Result<");
+            match func.kind {
+                FunctionKind::Constructor(_) => {
+                    self.push_str("Self");
+                }
+                _ => {
+                    self.print_result_ty(&func.results, TypeMode::Owned);
+                }
+            }
+
+            self.push_str(">");
+        }
+    }
+
     fn special_case_trappable_error(
         &self,
         owner: TypeOwner,
@@ -1815,45 +1853,9 @@ impl<'a> InterfaceGenerator<'a> {
         self.push_str(")");
         self.push_str(" -> ");
 
-        if let Some((r, error_typename)) = self.special_case_trappable_error(owner, &func.results) {
-            // Functions which have a single result `result<ok,err>` get special
-            // cased to use the host_wasmtime_rust::Error<err>, making it possible
-            // for them to trap or use `?` to propogate their errors
-            self.push_str("Result<");
-            if let Some(ok) = r.ok {
-                match func.kind {
-                    FunctionKind::Freestanding
-                    | FunctionKind::Method(_)
-                    | FunctionKind::Static(_) => {
-                        self.print_ty(&ok, TypeMode::Owned);
-                    }
-                    FunctionKind::Constructor(_) => {
-                        self.push_str("Self");
-                    }
-                }
-            } else {
-                self.push_str("()");
-            }
-            self.push_str(",");
-            self.push_str(&error_typename);
-            self.push_str(">");
-        } else {
-            // All other functions get their return values wrapped in an wasmtime::Result.
-            // Returning the anyhow::Error case can be used to trap.
-            self.push_str("wasmtime::Result<");
-            match func.kind {
-                FunctionKind::Freestanding | FunctionKind::Method(_) | FunctionKind::Static(_) => {
-                    self.print_result_ty(&func.results, TypeMode::Owned);
-                }
-                FunctionKind::Constructor(_) => {
-                    self.push_str("Self");
-                }
-            }
+        self.print_result_special_case_ty(func, owner);
 
-            self.push_str("> where Self: Sized");
-        }
-
-        self.push_str(";\n");
+        uwriteln!(self.src, "where Self: Sized;");
     }
 
     fn generate_guest_import_resource_function_trait_sig(&mut self, owner: TypeOwner, func: &Function) {
@@ -1898,45 +1900,9 @@ impl<'a> InterfaceGenerator<'a> {
         self.push_str(")");
         self.push_str(" -> ");
 
-        if let Some((r, error_typename)) = self.special_case_trappable_error(owner, &func.results) {
-            // Functions which have a single result `result<ok,err>` get special
-            // cased to use the host_wasmtime_rust::Error<err>, making it possible
-            // for them to trap or use `?` to propogate their errors
-            self.push_str("Result<");
-            if let Some(ok) = r.ok {
-                match func.kind {
-                    FunctionKind::Freestanding
-                    | FunctionKind::Method(_)
-                    | FunctionKind::Static(_) => {
-                        self.print_ty(&ok, TypeMode::Owned);
-                    }
-                    FunctionKind::Constructor(_) => {
-                        self.push_str("Self");
-                    }
-                }
-            } else {
-                self.push_str("()");
-            }
-            self.push_str(",");
-            self.push_str(&error_typename);
-            self.push_str(">");
-        } else {
-            // All other functions get their return values wrapped in an wasmtime::Result.
-            // Returning the anyhow::Error case can be used to trap.
-            self.push_str("wasmtime::Result<");
-            match func.kind {
-                FunctionKind::Freestanding | FunctionKind::Method(_) | FunctionKind::Static(_) => {
-                    self.print_result_ty(&func.results, TypeMode::Owned);
-                }
-                FunctionKind::Constructor(_) => {
-                    self.push_str("Self");
-                }
-            }
+        self.print_result_special_case_ty(func, owner);
 
-            self.push_str("> where Self: Sized");
-        }
-
-        self.push_str(";\n");
+        uwriteln!(self.src, "where Self: Sized;");
     }
 
     fn generate_function_trait_sig(&mut self, owner: TypeOwner, func: &Function) {
@@ -1958,26 +1924,7 @@ impl<'a> InterfaceGenerator<'a> {
         self.push_str(")");
         self.push_str(" -> ");
 
-        if let Some((r, error_typename)) = self.special_case_trappable_error(owner, &func.results) {
-            // Functions which have a single result `result<ok,err>` get special
-            // cased to use the host_wasmtime_rust::Error<err>, making it possible
-            // for them to trap or use `?` to propogate their errors
-            self.push_str("Result<");
-            if let Some(ok) = r.ok {
-                self.print_ty(&ok, TypeMode::Owned);
-            } else {
-                self.push_str("()");
-            }
-            self.push_str(",");
-            self.push_str(&error_typename);
-            self.push_str(">");
-        } else {
-            // All other functions get their return values wrapped in an wasmtime::Result.
-            // Returning the anyhow::Error case can be used to trap.
-            self.push_str("wasmtime::Result<");
-            self.print_result_ty(&func.results, TypeMode::Owned);
-            self.push_str(">");
-        }
+        self.print_result_special_case_ty(func, owner);
 
         self.push_str(";\n");
     }
