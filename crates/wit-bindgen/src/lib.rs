@@ -88,6 +88,20 @@ pub enum Ownership {
     },
 }
 
+#[derive(Default, Debug, Clone, Copy)]
+pub enum ResourceMode {
+    /// Object mode generates structures implementations of resources that are more ergonomic so instead of passing raw handles it instead will generate
+    /// stuctures for the resource representation or traits for the end user to implement depending if it's a resource being imported or exported from the guest.
+    /// Object mode doesn't yet handle cases where resources are nested inside of other types, but this will be expanded upon in the future.
+    Object,
+
+    /// Index mode will generate raw `Resource<T>` and `ResourceAny` handles that is suited
+    /// for more advanced use cases that are not yet supported by object mode.
+    /// Such as handles being passes inside of other data structures such as lists or if you generally need more control of how handles are stored on the host.
+    #[default]
+    Index,
+}
+
 #[derive(Default, Debug, Clone)]
 pub struct Opts {
     /// Whether or not `rustfmt` is executed to format generated code.
@@ -115,6 +129,9 @@ pub struct Opts {
 
     /// Resource Mappings
     pub resources: HashMap<String, String>,
+
+    /// Whether to generate object or index resource bindings
+    pub resource_mode: ResourceMode,
 }
 
 #[derive(Debug, Clone)]

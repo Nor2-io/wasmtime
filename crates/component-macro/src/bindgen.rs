@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use syn::parse::{Error, Parse, ParseStream, Result};
 use syn::punctuated::Punctuated;
 use syn::{braced, token, Ident, Token};
-use wasmtime_wit_bindgen::{Opts, Ownership, TrappableError};
+use wasmtime_wit_bindgen::{Opts, Ownership, ResourceMode, TrappableError};
 use wit_parser::{PackageId, Resolve, UnresolvedPackage, WorldId};
 
 pub struct Config {
@@ -101,6 +101,7 @@ impl Parse for Config {
                     }
                     Opt::With(val) => opts.with.extend(val),
                     Opt::Resources(val) => opts.resources.extend(val),
+                    Opt::ResourceMode(val) => opts.resource_mode = val,
                 }
             }
         } else {
@@ -173,6 +174,7 @@ mod kw {
     syn::custom_keyword!(interfaces);
     syn::custom_keyword!(with);
     syn::custom_keyword!(resources);
+    syn::custom_keyword!(resource_mode);
 }
 
 enum Opt {
@@ -186,6 +188,7 @@ enum Opt {
     Interfaces(syn::LitStr),
     With(HashMap<String, String>),
     Resources(HashMap<String, String>),
+    ResourceMode(ResourceMode),
 }
 
 impl Parse for Opt {
@@ -286,6 +289,25 @@ impl Parse for Opt {
             let fields: Punctuated<(String, String), Token![,]> =
                 contents.parse_terminated(with_field_parse, Token![,])?;
             Ok(Opt::Resources(HashMap::from_iter(fields.into_iter())))
+        } else if l.peek(kw::resource_mode) {
+            input.parse::<kw::resource_mode>()?;
+            input.parse::<Token![:]>()?;
+            let resource_mode = input.parse::<syn::Ident>()?;
+            Ok(Opt::ResourceMode(
+                match resource_mode.to_string().as_str() {
+                    "Object" => ResourceMode::Object,
+                    "Index" => ResourceMode::Index,
+                    name => {
+                        return Err(Error::new(
+                            resource_mode.span(),
+                            format!(
+                                "unrecognized resource mode: `{name}`; \
+                             expected `Object` or `Index`"
+                            ),
+                        ));
+                    }
+                },
+            ))
         } else {
             Err(l.error())
         }
