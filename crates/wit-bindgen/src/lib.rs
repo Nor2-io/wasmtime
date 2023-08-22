@@ -88,7 +88,7 @@ pub enum Ownership {
     },
 }
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResourceMode {
     /// Object mode generates structures implementations of resources that are more ergonomic so instead of passing raw handles it instead will generate
     /// stuctures for the resource representation or traits for the end user to implement depending if it's a resource being imported or exported from the guest.
@@ -1652,81 +1652,96 @@ impl<'a> InterfaceGenerator<'a> {
             );
         }
 
-        let func_name = func.name.to_snake_case();
+        let func_name = to_rust_ident(&func.name);
 
         //TODO: Change what is passed in depedning on if it's an import or exported resource in arguments
         //TODO: Handle resources as arguments and it lists, options, results and tuples
-        match func.kind {
-            FunctionKind::Freestanding => {
-                uwriteln!(self.src, "let host = get(caller.data_mut());");
 
-                uwrite!(self.src, "let r = host.{func_name}(");
-                for (i, _) in func.params.iter().enumerate() {
-                    uwrite!(self.src, "arg{i}, ");
-                }
-                if self.gen.opts.async_ {
-                    uwrite!(self.src, ").await;\n");
-                } else {
-                    uwrite!(self.src, ");\n");
-                }
+        if self.gen.opts.resource_mode == ResourceMode::Index {
+            uwriteln!(self.src, "let host = get(caller.data_mut());");
+
+            uwrite!(self.src, "let r = host.{func_name}(");
+            for (i, _) in func.params.iter().enumerate() {
+                uwrite!(self.src, "arg{i}, ");
             }
-            FunctionKind::Method(_) => {
-                //TODO: Change to from `get_resource_mut` to `get_resource` if it's not mutating the state
-                uwriteln!(
-                    self.src,
-                    "let mut resource = caller.data_mut().get_resource_mut(arg0)?;"
-                );
-
-                uwrite!(self.src, "let r = resource.{func_name}(");
-
-                // Skip the first argument as it's the resource handle which is handled by the trait implementation of `ResourceTable<T>`
-                for (i, _) in func.params.iter().enumerate().skip(1) {
-                    uwrite!(self.src, "arg{i}, ");
-                }
-                if self.gen.opts.async_ {
-                    uwrite!(self.src, ").await;\n");
-                } else {
-                    uwrite!(self.src, ");\n");
-                }
+            if self.gen.opts.async_ {
+                uwrite!(self.src, ").await;\n");
+            } else {
+                uwrite!(self.src, ");\n");
             }
-            FunctionKind::Static(_) => {
-                let resource_name = func.name[7..].to_string();
-                let resource_impl_name = self.gen.opts.resources.get(&resource_name).expect(
-                    &format!("resource `{resource_name}` doesn't have an implementation"),
-                );
+        } else {
+            match func.kind {
+                FunctionKind::Freestanding => {
+                    uwriteln!(self.src, "let host = get(caller.data_mut());");
 
-                uwrite!(self.src, "let r = {resource_impl_name}::{func_name}(");
-
-                for (i, _) in func.params.iter().enumerate() {
-                    uwrite!(self.src, "arg{i}, ");
+                    uwrite!(self.src, "let r = host.{func_name}(");
+                    for (i, _) in func.params.iter().enumerate() {
+                        uwrite!(self.src, "arg{i}, ");
+                    }
+                    if self.gen.opts.async_ {
+                        uwrite!(self.src, ").await;\n");
+                    } else {
+                        uwrite!(self.src, ");\n");
+                    }
                 }
-                if self.gen.opts.async_ {
-                    uwrite!(self.src, ").await;\n");
-                } else {
-                    uwrite!(self.src, ");\n");
-                }
-            }
-            FunctionKind::Constructor(_) => {
-                let resource_name = func.name[13..].to_string();
-                let resource_impl_name = self.gen.opts.resources.get(&resource_name).expect(
-                    &format!("resource `{resource_name}` doesn't have an implementation"),
-                );
+                FunctionKind::Method(_) => {
+                    //TODO: Change to from `get_resource_mut` to `get_resource` if it's not mutating the state
+                    uwriteln!(
+                        self.src,
+                        "let mut resource = caller.data_mut().get_resource_mut(arg0)?;"
+                    );
 
-                uwrite!(self.src, "let resource = {resource_impl_name}::new(");
+                    uwrite!(self.src, "let r = resource.{func_name}(");
 
-                for (i, _) in func.params.iter().enumerate() {
-                    uwrite!(self.src, "arg{i},");
+                    // Skip the first argument as it's the resource handle which is handled by the trait implementation of `ResourceTable<T>`
+                    for (i, _) in func.params.iter().enumerate().skip(1) {
+                        uwrite!(self.src, "arg{i}, ");
+                    }
+                    if self.gen.opts.async_ {
+                        uwrite!(self.src, ").await;\n");
+                    } else {
+                        uwrite!(self.src, ");\n");
+                    }
                 }
-                if self.gen.opts.async_ {
-                    uwrite!(self.src, ").await;\n");
-                } else {
-                    uwrite!(self.src, ")?;\n");
-                }
+                FunctionKind::Static(_) => {
+                    let resource_name = func.name[7..].to_string();
+                    let resource_impl_name = self.gen.opts.resources.get(&resource_name).expect(
+                        &format!("resource `{resource_name}` doesn't have an implementation"),
+                    );
 
-                uwrite!(
-                    self.src,
-                    "let r = caller.data_mut().new_resource(resource)?;"
-                );
+                    uwrite!(self.src, "let r = {resource_impl_name}::{func_name}(");
+
+                    for (i, _) in func.params.iter().enumerate() {
+                        uwrite!(self.src, "arg{i}, ");
+                    }
+                    if self.gen.opts.async_ {
+                        uwrite!(self.src, ").await;\n");
+                    } else {
+                        uwrite!(self.src, ");\n");
+                    }
+                }
+                FunctionKind::Constructor(_) => {
+                    let resource_name = func.name[13..].to_string();
+                    let resource_impl_name = self.gen.opts.resources.get(&resource_name).expect(
+                        &format!("resource `{resource_name}` doesn't have an implementation"),
+                    );
+
+                    uwrite!(self.src, "let resource = {resource_impl_name}::new(");
+
+                    for (i, _) in func.params.iter().enumerate() {
+                        uwrite!(self.src, "arg{i},");
+                    }
+                    if self.gen.opts.async_ {
+                        uwrite!(self.src, ").await;\n");
+                    } else {
+                        uwrite!(self.src, ")?;\n");
+                    }
+
+                    uwrite!(
+                        self.src,
+                        "let r = caller.data_mut().new_resource(resource)?;"
+                    );
+                }
             }
         }
 
@@ -2323,14 +2338,18 @@ impl<'a> InterfaceGenerator<'a> {
             for (i, (resource_trait_name, (arg_name, resource_owner))) in
                 args_map.iter().enumerate()
             {
-                if resource_owner == owner {
+                if resource_owner == owner && self.gen.opts.resource_mode == ResourceMode::Object {
                     uwriteln!(
                         self.src,
-                        "{arg_name}: {resource_trait_name} + wasmtime::component::ToHandle,"
+                        "{arg_name}: {resource_trait_name} + wasmtime::component::ToHandle, "
                     );
                 } else {
-                    uwriteln!(self.src, "{arg_name}: {resource_trait_name} + 'static,");
-                    uwrite!(t, "wasmtime::component::ResourceTable<{arg_name}> ");
+                    if self.gen.opts.resource_mode == ResourceMode::Object {
+                        uwriteln!(self.src, "{arg_name}: {resource_trait_name} + 'static,");
+                        uwrite!(t, "wasmtime::component::ResourceTable<{arg_name}> ");
+                    } else {
+                        uwriteln!(self.src, "{arg_name},");
+                    }
 
                     if i != args_map.len() - 1 {
                         uwrite!(t, "+ ");
@@ -2338,10 +2357,14 @@ impl<'a> InterfaceGenerator<'a> {
                 }
             }
 
-            if &t != "" {
+            if &t != "" && self.gen.opts.resource_mode == ResourceMode::Object {
                 uwriteln!(self.src, "T: {t},");
 
                 uwriteln!(self.src, "S: wasmtime::AsContextMut<Data = T>");
+            } else if &t != "" {
+                uwriteln!(self.src, "T,");
+
+                uwriteln!(self.src, "S: wasmtime::AsContextMut");
             } else {
                 uwrite!(self.src, "S: wasmtime::AsContextMut");
             }
@@ -2361,7 +2384,11 @@ impl<'a> InterfaceGenerator<'a> {
 
                         match args_map.get(&resource_trait_name) {
                             Some((arg_name, _)) => {
-                                uwrite!(self.src, "{arg_name}");
+                                if self.gen.opts.resource_mode == ResourceMode::Index {
+                                    uwrite!(self.src, "wasmtime::component::Resource<{arg_name}>");
+                                } else {
+                                    uwrite!(self.src, "{arg_name}");
+                                }
                             }
                             _ => self.print_ty(&param.1, TypeMode::AllBorrowed("'_")),
                         }
@@ -2440,13 +2467,15 @@ impl<'a> InterfaceGenerator<'a> {
 
         self.define_callee(func, &owner);
 
-        for (i, param) in params.iter().enumerate() {
-            if let Some(param) = param {
-                if param.first().unwrap().1 != owner {
-                    uwrite!(
-                        self.src,
-                        "let arg{i} = store.as_context_mut().data_mut().new_resource(arg{i})?;"
-                    );
+        if self.gen.opts.resource_mode == ResourceMode::Object {
+            for (i, param) in params.iter().enumerate() {
+                if let Some(param) = param {
+                    if param.first().unwrap().1 != owner {
+                        uwrite!(
+                            self.src,
+                            "let arg{i} = store.as_context_mut().data_mut().new_resource(arg{i})?;"
+                        );
+                    }
                 }
             }
         }
@@ -2461,7 +2490,9 @@ impl<'a> InterfaceGenerator<'a> {
         );
         for (i, param) in params.iter().enumerate() {
             if let Some(param) = param {
-                if param.first().unwrap().1 == owner {
+                if param.first().unwrap().1 == owner
+                    && self.gen.opts.resource_mode == ResourceMode::Object
+                {
                     uwrite!(self.src, "arg{i}.to_handle(), ");
                 } else {
                     uwrite!(self.src, "arg{i}, ");
